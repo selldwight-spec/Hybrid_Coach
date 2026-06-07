@@ -23,9 +23,13 @@ export default async function DashboardPage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <span className="text-orange-500 font-bold text-lg">Hybrid Coach</span>
-          <span className="text-xs text-zinc-400 bg-white border border-zinc-200 rounded-full px-3 py-1 capitalize">
-            {subscription?.tier ?? 'free'}
-          </span>
+          <div className="flex items-center gap-2">
+            <a href="/profile" className="text-xs text-zinc-400 hover:text-zinc-600">Profile</a>
+            <span className="text-zinc-200">·</span>
+            <span className="text-xs text-zinc-400 bg-white border border-zinc-200 rounded-full px-3 py-1 capitalize">
+              {subscription?.tier ?? 'free'}
+            </span>
+          </div>
         </div>
 
         {/* Greeting */}
@@ -73,7 +77,7 @@ export default async function DashboardPage() {
         )}
 
         {program && (
-          <div className="bg-white rounded-2xl p-6 border border-zinc-200">
+          <div className="bg-white rounded-2xl p-6 border border-zinc-200 mb-4">
             <h2 className="font-semibold text-zinc-900 mb-3">This week</h2>
             <div className="space-y-2">
               {(program.weeklyStructure as string[]).map((session, i) => (
@@ -85,6 +89,18 @@ export default async function DashboardPage() {
             </div>
           </div>
         )}
+
+        {/* Persistent coach button */}
+        <a
+          href="/chat"
+          className="flex items-center justify-between w-full bg-orange-500 hover:bg-orange-600 text-white rounded-2xl px-6 py-4 transition-colors"
+        >
+          <div>
+            <div className="font-semibold text-sm">Open coaching session</div>
+            <div className="text-orange-100 text-xs mt-0.5">Ask anything — sessions, progress, adjustments</div>
+          </div>
+          <span className="text-xl">→</span>
+        </a>
       </div>
     </main>
   )
