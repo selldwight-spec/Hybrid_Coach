@@ -1,35 +1,64 @@
-# Hybrid Coach
+# Hybrid Coach SaaS — Architecture Assessment Plan
 
-A SaaS web app delivering AI-powered hybrid training coaching (concurrent strength + endurance) for multiple users, built to minimize LLM token costs at runtime.
+## Context
+
+The user has a large JSON-encoded coaching prompt (~5,000–8,000 tokens for the full version, ~600–800 tokens for the bootstrap) intended to run inside an LLM at session time. The goal is to restructure this for a multi-tenant SaaS web app while minimizing per-call LLM token consumption.
 
 ---
 
-## Architecture Overview
+## Token Cost Breakdown (Current State)
 
-The core insight: the original coaching prompt is 4,000–5,500 tokens if sent in full. By moving static, structural, and user-specific content into a database and frontend, the per-call LLM context shrinks to **~350–500 tokens**.
-
-### Token Cost Breakdown (Original Prompt)
-
-| Section | Approx Tokens | Disposition |
+| Section | Approx Tokens | Notes |
 |---|---|---|
-| Bootstrap / system identity | 600–800 | Replaced by minimal static prompt |
-| Philosophy / interference rules | ~300 | Encoded in application code |
-| Evidence framework tier defs | ~400 | On-demand injection only |
-| Intake phases 1–6 | ~1,500–2,000 | Moved to frontend wizard |
-| Sport/gym/hobby branch questions | ~800–1,000 | Frontend JSON config |
+| bootstrap_prompt (system identity) | 600–800 | Sent every chat |
+| philosophy / interference rules | ~300 | Static, rule-based |
+| evidence_framework tier defs | ~400 | Static reference data |
+| intake phases 1–6 (full flow) | ~1,500–2,000 | Conditional branching logic |
+| sport/gym/hobby branch questions | ~800–1,000 | Conditional, mostly UI logic |
+| **Total (full prompt)** | **~4,000–5,500** | Sent during intake runs |
 
-### What Moves Out of the LLM
+Target: **~350–500 tokens** per call after moving static and structural content out.
 
-1. **Intake flow** → Frontend wizard (5 steps, zero LLM calls)
-2. **User profile (L1)** → PostgreSQL; compressed to ~150 tokens per call
-3. **Program data (L2)** → PostgreSQL; current week only, ~100 tokens
-4. **Session state (L3)** → PostgreSQL; ~50-token summary per call
-5. **Evidence framework** → Static config; injected only on keyword trigger
-6. **Interference rules** → Backend scheduling constraint logic
-7. **Branch Q&A options** → Frontend JSON config
-8. **Conversation history** → Sliding window (last 6 turns); full transcript stored in DB
+---
 
-### Minimal LLM System Prompt (~150–200 tokens, cacheable)
+## What Moves OUT of the LLM at Runtime
+
+### 1. Intake Flow (Phases 1–6) → Frontend UI Wizard
+- All branching conditions become frontend state machine logic
+- Options/sub-questions become UI components
+- On completion, results stored directly to DB as structured L1
+- **LLM tokens saved:** 100% of intake prompt
+
+### 2. User Profile — L1 → Database
+- Reconstructed into a ~150-token compressed string by the Context Assembler per call
+- Example: `"Runner, 3x/wk, strength-lean, full gym, no injuries, 34yo, 78kg"`
+
+### 3. Program Data — L2 → Database
+- Context Assembler fetches current week only, compresses to ~100 tokens
+- Full mesocycle history stays in DB
+
+### 4. Session State — L3 → Database
+- Injected as ~50-token summary: `"Week 3/4. Last: upper push Mon. Today: lower. Fatigue: none."`
+
+### 5. Evidence Framework → Static Config / On-Demand
+- Only injected when user message contains trigger keywords (`"why"`, `"evidence"`, `"studies"`, `"best X"`)
+
+### 6. Philosophy / Interference Rules → Application Code
+- Backend enforces scheduling constraints; LLM gets a 2-line summary only
+
+### 7. Branch Q&A Options → Frontend JSON Config
+- All `options`, `followup`, `conditional_by_sport` keys are UI scaffolding, not reasoning tasks
+
+### 8. Conversation History → Sliding Window Strategy *(new)*
+- Store full transcript in DB; inject only last N turns (tunable, start at 6)
+- Trim policy: summarize older turns into a 1–2 sentence "earlier context" prefix
+- Prevents unbounded token growth across long sessions
+
+---
+
+## Minimal LLM System Prompt (What Stays)
+
+~150–200 tokens, static, cacheable:
 
 ```
 You are a hybrid training coach. You program concurrent strength + endurance training.
@@ -39,11 +68,11 @@ Never give generic advice — every prescription derives from the user context b
 If user context is incomplete, ask for the missing piece — don't guess.
 ```
 
-Applied with Anthropic `cache_control` — identical for all users, qualifies for prompt caching.
+Use Anthropic `cache_control` on this block — it's identical for every user, so it qualifies for prompt caching and reduces cost further.
 
 ---
 
-## System Architecture
+## SaaS Architecture
 
 ```
 ┌──────────────────────────────────────────────────────┐
@@ -143,11 +172,20 @@ Applied with Anthropic `cache_control` — identical for all users, qualifies fo
 
 ---
 
-## Intake Flow
+## Revised Intake Flow — Casual-Exerciser Friendly
 
-The original 6-phase intake (~15–20 questions) is replaced with a 5-step aspiration-first wizard. No LLM calls are made during intake. Results are written directly to the L1 table.
+### Problems with the Original Flow
+1. **Opens with medical screening** — "injuries, health conditions, limitations, medical clearance" as the first thing a new user sees signals clinical risk, not fitness aspiration
+2. **"Soft stop" on medical clearance** — blocks users from proceeding; causes abandonment
+3. **Clinical language** — "significant—affects what I can do", "limitations", "health conditions" read like a doctor's form
+4. **15–20 questions across 6 phases** — exhausting for a casual user who just wants to get started
+5. **Reality check phrasing** — "are you sure that's realistic, not ideal?" is condescending
+6. **Body data (age/height/weight) as required** — feels invasive before trust is established
+7. **Phase ordering wrong** — leads with risk before establishing what the user wants
 
-**Step 1 — What are you after?**
+### Revised Flow — 5 Steps, Aspiration-First
+
+**Step 1: What are you after?** *(replaces Phase 2 identity)*
 > "Let's build something that fits your life. What's the main thing you're going for?"
 - I want to get stronger and build muscle
 - I want more stamina and fitness
@@ -155,107 +193,126 @@ The original 6-phase intake (~15–20 questions) is replaced with a 5-step aspir
 - I want to look and feel better overall
 - Just building a habit — I'll figure out the details as I go
 
-**Step 2 — Where are you starting from?**
+**Step 2: Where are you starting from?** *(replaces training_maturity)*
 > "No judgment — just helps me calibrate."
 - Pretty new to this / getting back into it
 - I've trained on and off — know the basics
 - I train regularly and know what I'm doing
 
-**Step 3 — What does a realistic week look like?**
+**Step 3: What does a realistic week look like?** *(replaces Phase 4 days + duration)*
 > "Think about your actual schedule, not your ideal one."
 - Busy — 2–3 days, 30–45 min each
 - Moderate — 3–4 days, around an hour
 - Committed — 4–5 days, 60–90 min
 
-**Step 4 — Where do you train?**
+**Step 4: Where do you train?** *(equipment)*
 - Commercial gym
 - Home setup (barbell, rack, dumbbells)
 - Home basics (dumbbells, bands)
 - Wherever — minimal gear
 
-**Step 5 — Anything to know before we build your plan?** *(optional)*
-> "You can always update this later."
+**Step 5: Anything to know before we build your plan?** *(replaces alarming Phase 1)*
+> "Optional but helpful — you can always update this."
 - All good, nothing to flag
 - Minor stuff — nothing that stops me
-- I have something to work around → light follow-up: "What is it, and what does it affect?"
-- I'm checking with my doctor / easing back in → *"Smart — we'll start easy and build from there."* No hard stop; `training_maturity: cautious` flagged in L1.
+- I have something to work around (→ light follow-up: "What is it, and what does it affect?")
+- I'm checking with my doctor / easing back in
 
-**Deferred to profile settings or first session:** age/height/weight, sport-specific depth questions, cardio preferences, coaching style preference.
+→ **No soft stop.** For "checking with my doctor": *"Smart — we'll start easy and build from there. You can update this any time."* User proceeds normally. Flag `training_maturity: cautious` in L1.
+
+### What's Deferred, Not Removed
+- Age / height / weight → asked optionally in profile settings after first session
+- Sport-specific depth questions (competition dates, performance goals) → surfaced in chat after profile is set, not during intake
+- Cardio preferences → asked by the coach in the first session ("how do you feel about cardio?"), feels natural there
+- Coaching style preference → inferred from chat behavior initially; offered as a settings toggle
+
+### Tone Principles for Intake Copy
+- Lead with aspiration ("what are you going for") not risk ("any health conditions")
+- Use "realistic week" not "realistic vs ideal"
+- Never use the word "limitation" or "clearance"
+- Completion message: "You're set. Let's build your first week." — no medical disclaimers
 
 ---
 
-## 20 Planned Features
+## 20 Planned Enhancements (Prioritized)
 
 ### Tier 1 — Required Before Launch
 
-| # | Feature | Reason |
+| # | Enhancement | Why It Can't Wait |
 |---|---|---|
 | 1 | Profile / L1 editing after intake | Users change goals and get injured — no update path = churn |
-| 2 | Workout history / session log UI | Primary retention loop |
-| 3 | Billing / Stripe integration | Required for SaaS operation; affects DB schema |
-| 4 | Mobile / PWA support | Fitness is 80%+ mobile |
-| 5 | Conversation history sliding window | LLM forgets mid-session without it |
-| 6 | Mesocycle transition / L2 rebuild | App hits a hard stop at week 4 without this |
+| 2 | Workout history / session log UI | Primary retention loop; users need to see progress |
+| 3 | Billing / Stripe integration | Can't operate as SaaS without it; affects DB schema |
+| 4 | Mobile / PWA support | Fitness is 80%+ mobile; this is table stakes |
+| 5 | Conversation history sliding window | Without this, LLM forgets turns 3+ within a session — filed as a bug |
+| 6 | Re-run / reset mesocycle (L2 rebuild) | App has a hard stop at week 4 without a transition flow |
 
 ### Tier 2 — Ship Within First Month
 
-| # | Feature | Notes |
+| # | Enhancement | Notes |
 |---|---|---|
-| 7 | Progress / strength charts | Primary retention mechanic |
-| 8 | Workout reminders / push notifications | Habit formation; PWA web push |
-| 9 | Exercise substitution / swap UI | Equipment constraints hit immediately |
-| 10 | Admin / operator dashboard | Token spend, errors, stuck users |
-| 11 | Rate limiting per billing tier | Prevent API cost abuse |
-| 12 | Offline workout access (PWA caching) | Gym wifi is unreliable |
+| 7 | Progress / strength charts | Visual proof of progress is the primary retention mechanic |
+| 8 | Workout reminders / push notifications | Drives habit formation; PWA enables without native app |
+| 9 | Exercise substitution / swap UI | Users with equipment constraints hit this immediately |
+| 10 | Admin / operator dashboard | Token spend, error rates, stuck users — needed to run the business |
+| 11 | Rate limiting per billing tier | Prevents one power user from consuming disproportionate API cost |
+| 12 | Offline workout access (PWA caching) | Gym wifi is unreliable; workouts must load without network |
 
 ### Tier 3 — Growth Phase
 
-| # | Feature | Notes |
+| # | Enhancement | Notes |
 |---|---|---|
-| 13 | Wearable / health app integration | Apple Health, Garmin → auto-populate L3 |
-| 14 | Import existing training history | Seed L2 key lifts for returning athletes |
-| 15 | Nutrition / macro guidance | Protein targets already in source prompt |
-| 16 | Calendar integration | Sync to Google / Apple Calendar |
-| 17 | Coach / trainer portal | White-label for human coaches |
-| 18 | Dark mode | Universal UI requirement |
-| 19 | Social / accountability features | Streak sharing, PR announcements |
-| 20 | Internationalization (i18n) | Spanish first given source material |
+| 13 | Wearable / health app integration | Apple Health, Garmin, Whoop → auto-populate L3 fatigue flags |
+| 14 | Import existing training history | CSV or manual entry; populate initial L2 key lifts for returning athletes |
+| 15 | Nutrition / macro guidance | Protein targets already in prompt; users will ask for full meal guidance |
+| 16 | Calendar integration | Sync workout schedule to Google / Apple Calendar |
+| 17 | Coach / trainer portal | White-label: human coaches manage multiple client profiles |
+| 18 | Dark mode | Universal UI request; design system token makes this straightforward |
+| 19 | Social / accountability features | Streak sharing, PR announcements, accountability partners |
+| 20 | Internationalization (i18n) | Global SaaS; Spanish is a natural first add given the source material |
 
 ---
 
-## Implementation Phases
+## Revised Implementation Phases
 
-### Phase 1 — Foundation
-- Database schema (users, L1, L2, L3, logs, chat, subscriptions)
-- Auth (Clerk or Supabase)
-- Revised intake wizard (5 steps, aspiration-first, no LLM, no hard stop)
-- L1 write + edit endpoints
-- Mobile-responsive layout / PWA manifest
-- Billing (Stripe) — subscription tiers, usage metering
+### Phase 1 — Foundation (Pre-launch)
+- [ ] Database schema (users, L1, L2, L3, logs, chat, subscriptions)
+- [ ] Auth (Clerk or Supabase)
+- [ ] **Revised intake wizard** (5 steps, aspiration-first, no LLM, no soft stop)
+- [ ] L1 write + edit endpoints (profile editor from day 1)
+- [ ] Mobile-responsive layout / PWA manifest
+- [ ] Billing (Stripe) — subscription tiers, usage metering wired to token quota
 
 ### Phase 2 — Core Chat
-- Context Assembler with sliding window (last 6 turns)
-- Minimal system prompt with `cache_control`
-- Chat endpoint with per-user context injection + rate limiting
-- L3 auto-update after each session
-- Workout log auto-write from session transcript
+- [ ] Context Assembler service with sliding window (last 6 turns)
+- [ ] Minimal system prompt with `cache_control`
+- [ ] Chat endpoint with per-user context injection + rate limiting
+- [ ] L3 auto-update after each session
+- [ ] Workout log write (auto-structured from session transcript)
 
 ### Phase 3 — Program & History
-- Program builder (L2 generation via LLM, once per mesocycle)
-- Program dashboard + mesocycle transition flow
-- Workout history UI
-- Progress charts (key lift trends, volume over time)
-- Exercise substitution UI
+- [ ] Program builder (L2 generation via LLM, once per mesocycle)
+- [ ] Program dashboard + mesocycle transition flow (L2 rebuild trigger)
+- [ ] Workout history UI
+- [ ] Progress charts (key lift trends, volume over time)
+- [ ] Exercise substitution UI (lookup from static exercise library)
 
 ### Phase 4 — Retention & Operations
-- Push notifications / workout reminders
-- Offline caching (service worker for current week)
-- Admin dashboard
-- Evidence framework on-demand injection
-- Deload auto-detection (RPE trend analysis on L3)
+- [ ] Push notifications / workout reminders (PWA + web push)
+- [ ] Offline caching (service worker for current week's workouts)
+- [ ] Admin dashboard (token usage, error rates, user states)
+- [ ] Evidence framework on-demand injection
+- [ ] Deload auto-detection (backend logic on L3 RPE trends)
 
 ### Phase 5 — Growth
-- Wearable integration, import history, nutrition module, calendar sync, coach portal, dark mode, i18n, social features
+- [ ] Wearable integration (Apple Health / Garmin API → L3)
+- [ ] Import training history (CSV → L2 seed data)
+- [ ] Nutrition / macro module
+- [ ] Calendar sync (Google / Apple)
+- [ ] Coach portal (multi-client management)
+- [ ] Dark mode
+- [ ] i18n framework (en + es first)
+- [ ] Social features (streaks, PR sharing)
 
 ---
 
@@ -264,10 +321,24 @@ The original 6-phase intake (~15–20 questions) is replaced with a 5-step aspir
 | Risk | Mitigation |
 |---|---|
 | LLM loses nuance from compressed context | Tune Context Assembler; LLM can request more detail via chat |
-| Conversation window grows unbounded | Sliding window + summarization; full history in DB |
-| Interference rules complex to encode | Start LLM-enforced; migrate to code as edge cases surface |
-| Users bypass intake → empty layers | Gate chat behind intake completion |
-| Multi-tenant token bleed | Each API call assembled fresh from DB per user_id |
-| Single power user inflates API costs | Per-tier token quotas at middleware level |
-| Mesocycle ends with no transition path | Auto-trigger rebuild prompt at week 4 |
-| Medical intake causes abandonment | No hard stop; gentle advisory path for all cases |
+| Conversation window grows unbounded | Sliding window + summarization; log full history in DB |
+| Interference rule logic complex to encode | Start with LLM-enforced; migrate to code as edge cases surface |
+| Users bypass intake → empty layers | Gate chat behind intake completion; show progress bar |
+| Multi-tenant token isolation | Each API call assembled fresh from DB per user_id |
+| One power user runs up API costs | Per-tier token quotas enforced at API middleware level |
+| Mesocycle ends, user has no transition path | Deload detection + mesocycle rebuild prompt triggered automatically at week 4 |
+| Medical soft-stop causes abandonment | Replaced with gentle advisory; no user is ever blocked from proceeding |
+
+---
+
+## Verification
+
+- **Intake:** Complete revised 5-step wizard → confirm L1 row with all required fields → confirm no user path ends in a hard stop
+- **Chat:** Send "what's today's session?" → verify context assembler injects correct L1/L2/L3 → LLM response references user-specific data
+- **Sliding window:** Send 10+ turns → verify only last 6 injected into prompt → verify token count stays ≤ 500
+- **Token audit:** Log token counts per call, verify average ≤ 500 tokens context
+- **Billing:** Create free-tier user, hit message quota → verify rate limit response; upgrade → verify limit lifts
+- **Multi-user:** Two users with different profiles → confirm no cross-contamination
+- **Mesocycle transition:** Advance L2 to week 4 → confirm deload flag triggers and transition prompt appears
+- **Missing layers:** Delete L2 → confirm LLM responds with correct rebuild fallback
+- **Mobile:** Run intake + full chat session on a 375px viewport
