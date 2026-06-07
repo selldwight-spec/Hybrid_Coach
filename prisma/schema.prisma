@@ -1,0 +1,146 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  authId    String   @unique // Supabase auth.users.id
+  email     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  profile      Profile?
+  program      Program?
+  sessionState SessionState?
+  chatMessages ChatMessage[]
+  workoutLogs  WorkoutLog[]
+  subscription Subscription?
+}
+
+model Profile {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Goal & identity
+  goalPrimary      String
+  sport            String?
+  sportFreqPerWeek Int?
+
+  // Schedule
+  gymDaysPerWeek     Int
+  sessionDurationMin Int
+
+  // Equipment
+  equipment String // full_gym | home_full | home_basic | minimal
+
+  // Experience
+  trainingMaturity String // beginner | low | moderate | advanced | cautious
+
+  // Derived track
+  track String? // strength-lean | endurance-lean | balanced
+
+  // Preferences (collected post-intake or in first session)
+  coachingStyle    String?
+  cardioPreference String?
+
+  // Body data (optional, filled in profile settings)
+  age      Int?
+  weightKg Float?
+  heightCm Float?
+
+  // Free-text health notes from intake step 5
+  healthNotes String?
+
+  intakeVersion Int @default(1)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Program {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  mesocycle        Int     @default(1)
+  phase            String  @default("accumulation")
+  totalWeeks       Int     @default(4)
+  currentWeek      Int     @default(1)
+  weeklyStructure  Json    // string[]
+  keyLifts         Json    // { squat?: number, deadlift?: number, bench?: number }
+  progressionModel String  @default("linear")
+  deloadNext       Boolean @default(false)
+  mesocycleHistory Json    @default("[]")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model SessionState {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  lastSessionType    String?
+  lastSessionDate    DateTime?
+  fatigueFlags       Json    @default("{\"general\":false,\"lower\":false,\"upper\":false}")
+  missedSessionsWeek Int     @default(0)
+  adjustments        Json    @default("[]")
+
+  updatedAt DateTime @updatedAt
+}
+
+model ChatMessage {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  role       String // user | assistant
+  content    String
+  tokenCount Int    @default(0)
+  turnIndex  Int
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, turnIndex])
+}
+
+model WorkoutLog {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  sessionType String
+  date        DateTime @default(now())
+  exercises   Json     // { name, sets: { reps, weight, rpe }[] }[]
+  notes       String?
+  rpeAvg      Float?
+  durationMin Int?
+  completed   Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, date])
+}
+
+model Subscription {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  stripeCustomerId     String  @unique
+  stripeSubscriptionId String? @unique
+  tier                 String  @default("free") // free | pro | coach
+  status               String  @default("active") // active | canceled | past_due
+  usageThisMonth       Int     @default(0)
+  tokenQuota           Int     @default(50000)
+
+  createdAt DateTime @default(now())
+  updatedAt        DateTime  @updatedAt
+}
