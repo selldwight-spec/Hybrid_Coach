@@ -90,6 +90,25 @@ export default async function DashboardPage() {
           </div>
         )}
 
+        {/* Nav grid */}
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          {[
+            { href: '/program', label: 'Program', desc: 'Mesocycle & weekly structure' },
+            { href: '/history', label: 'History', desc: 'Past sessions' },
+            { href: '/progress', label: 'Progress', desc: 'Charts & key lifts' },
+            { href: '/exercises', label: 'Exercises', desc: 'Library & substitutes' },
+          ].map(({ href, label, desc }) => (
+            <a
+              key={href}
+              href={href}
+              className="bg-white rounded-xl border border-zinc-200 p-4 hover:border-zinc-300 transition-colors"
+            >
+              <div className="text-sm font-medium text-zinc-900">{label}</div>
+              <div className="text-xs text-zinc-400 mt-0.5">{desc}</div>
+            </a>
+          ))}
+        </div>
+
         {/* Persistent coach button */}
         <a
           href="/chat"
