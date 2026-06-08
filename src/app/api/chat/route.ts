@@ -4,6 +4,7 @@ import { db } from '@/lib/db'
 import { createClient } from '@/lib/supabase/server'
 import { anthropic, MODEL, SYSTEM_PROMPT } from '@/lib/anthropic'
 import { assembleContext, parseAssistantResponse } from '@/lib/context-assembler'
+import { checkDeloadTrigger } from '@/lib/deload'
 
 const schema = z.object({
   message: z.string().min(1).max(4000),
@@ -126,11 +127,14 @@ export async function POST(req: NextRequest) {
           userId: appUser.id,
           sessionType: l3Update.sessionType,
           date: new Date(),
-          exercises: [], // Phase 3: extract from visibleText
+          exercises: [],
           notes: visibleText,
           completed: true,
         },
       })
+
+      // Auto-detect deload need from RPE trend
+      await checkDeloadTrigger(appUser.id)
     }
   }
 
