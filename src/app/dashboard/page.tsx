@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { db } from '@/lib/db'
+import { PushOptIn } from '@/components/PushOptIn'
 
 export default async function DashboardPage() {
   const supabase = await createClient()
@@ -23,7 +24,8 @@ export default async function DashboardPage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <span className="text-orange-500 font-bold text-lg">Hybrid Coach</span>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            <PushOptIn />
             <a href="/profile" className="text-xs text-zinc-400 hover:text-zinc-600">Profile</a>
             <span className="text-zinc-200">·</span>
             <span className="text-xs text-zinc-400 bg-white border border-zinc-200 rounded-full px-3 py-1 capitalize">
